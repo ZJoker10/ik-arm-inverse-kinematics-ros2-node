@@ -1,123 +1,85 @@
-# ik_arm — Inverse Kinematics ROS2 Node
+# IK Arm — ROS2 Inverse Kinematics Node
 
-A ROS2 node that simulates a 6-DOF robotic arm and provides inverse
-kinematics using the damped pseudo-inverse of a numerical Jacobian
-(SVD-based Levenberg–Marquardt).
+**Robot Programming project — Sapienza 2025/26**
 
-## Architecture
+6-DOF robotic arm simulation in ROS2 Jazzy.  
+Implements inverse kinematics using the damped pseudo-inverse (SVD) of a numerical Jacobian, with automatic random restarts for robustness.
 
-```
-┌─────────────────────────────────────────────────┐
-│                  IKArmNode                       │
-│                                                   │
-│  /target_pose  (sub) ───┐                        │
-│  /joint_commands (sub) ──┤                        │
-│                          │                        │
-│                   ┌──────▼──────┐                │
-│                   │  RobotModel │                │
-│                   │  (static    │                │
-│                   │   library)  │                │
-│                   │  FK, Jac,   │                │
-│                   │  IK (SVD)   │                │
-│                   └──────▲──────┘                │
-│                          │                        │
-│  /compute_ik   (action) ─┘                        │
-│                                                   │
-│  /joint_states (pub)                              │
-│  /ee_pose      (pub)                              │
-└─────────────────────────────────────────────────┘
-```
+### Project requirements
 
-## Quick Start
+- ✅ **ROS node** that simulates a robotic arm
+- ✅ **Joint position control** via `/joint_commands` topic
+- ✅ **Inverse kinematics** using pseudo-inverse on a **numerical Jacobian**
+- ✅ **DH parameters** loaded from a **configuration file** (`config/arm_config.yaml`)
+
+### Project structure
+
+- `robot_model` — pure C++/Eigen library (FK, Jacobian, IK solver), no ROS dependencies
+- `ik_arm_node` — ROS2 node that uses `robot_model` to serve IK and joint control via topics
+
+## Quick start
 
 ```bash
-# Build
-cd ~/ros2_ws
-colcon build --packages-select ik_arm
-source install/setup.bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
 
-# Run the node
-ros2 run ik_arm ik_arm_node
-
-# In another terminal, run the demo
-ros2 run ik_arm ik_demo
-```
-
-Or via the launch file:
-
-```bash
-ros2 launch ik_arm ik_arm.launch.py joint_move_speed:=0.05
+ros2 run ik_arm ik_arm_node --ros-args --params-file \
+  ~/ros2_ws/src/ik_arm/config/arm_config.yaml
 ```
 
 ## Topics
 
 | Topic | Type | Direction | Description |
 |-------|------|-----------|-------------|
-| `/target_pose` | `PoseStamped` | Sub | IK target pose for the end-effector |
-| `/joint_commands` | `Float64MultiArray` | Sub | Direct joint angle command |
-| `/joint_states` | `JointState` | Pub | Current joint positions |
-| `/ee_pose` | `PoseStamped` | Pub | Current end-effector pose |
+| `/target_pose` | `PoseStamped` | Subscribe | IK target pose — triggers IK solver |
+| `/joint_commands` | `Float64MultiArray` | Subscribe | Direct joint position control |
+| `/joint_states` | `JointState` | Publish | Current joint angles (100 Hz) |
+| `/ee_pose` | `PoseStamped` | Publish | Current end-effector pose |
 
-## Action
+## Usage examples
 
-| Action | Type | Description |
-|--------|------|-------------|
-| `/compute_ik` | `ComputeIK` | Compute IK for a target pose and move the arm |
-
-**Goal:** `geometry_msgs/Pose target_pose`
-
-**Result:** `float64[] joint_positions`, `bool success`,
-`float64 position_error`, `float64 orientation_error`
-
-**Feedback:** `float64 current_position_error`,
-`float64 current_orientation_error`, `int32 iteration`
-
-## Robot Model (PUMA 560-like)
-
-| Joint | a (m) | d (m) | α (rad) | θ₀ff (rad) | Range (rad) |
-|-------|-------|-------|---------|-----------|-------------|
-| 1 | 0.00 | 0.30 | +π/2 | 0.0 | ±π |
-| 2 | 0.30 | 0.00 | 0 | 0.0 | ±2.094 |
-| 3 | 0.10 | 0.00 | −π/2 | 0.0 | ±2.094 |
-| 4 | 0.00 | 0.30 | +π/2 | 0.0 | ±π |
-| 5 | 0.00 | 0.00 | −π/2 | 0.0 | ±2.094 |
-| 6 | 0.00 | 0.15 | 0 | 0.0 | ±π |
-
-All joints are revolute. DH convention: Craig.
-
-## Parameters
-
-All parameters can be set via YAML config file or the launch file.
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `joint_move_speed` | 0.08 | Max joint speed (rad/s) |
-| `control_rate` | 100.0 | Control loop rate (Hz) |
-| `position_tolerance` | 0.001 | IK position tolerance (m) |
-| `orientation_tolerance` | 0.01 | IK orientation tolerance (rad) |
-| `ik_damping` | 0.1 | SVD damping factor λ |
-| `ik_max_iterations` | 200 | Max iterations per attempt |
-
-## Implementation Details
-
-- **Forward kinematics**: Craig DH convention, 4×4 homogeneous transforms
-- **Jacobian**: Numerical (finite difference, ε = 1e⁻⁸)
-- **IK solver**: SVD damped pseudo-inverse (Levenberg–Marquardt)
-  `Δq = Σᵢ σᵢ/(σᵢ²+λ²)·(Uᵢ·e)·Vᵢ`
-- **Retries**: Up to 5 random restarts if no convergence
-- **Control loop**: 100 Hz smooth interpolation with deadband (1e⁻⁶)
-- **Action**: Runs IK in a worker thread with iteration feedback
-
-## Tests
-
+**Send an IK target:**
 ```bash
-colcon test --packages-select ik_arm
-colcon test-result --verbose
+ros2 topic pub --once /target_pose geometry_msgs/PoseStamped \
+  "{header: {frame_id: 'base_link'}, pose: {position: {x: 0.4, y: 0.0, z: 0.5}, orientation: {x: 0, y: 0, z: 0, w: 1}}}"
 ```
 
-- `test_robot_model`: FK, Jacobian dimensions, IK convergence, clamping
-- `test_ik_arm_node`: Node creation, parameters, DH sizes
+**Control joints directly:**
+```bash
+ros2 topic pub --once /joint_commands std_msgs/Float64MultiArray \
+  "{data: [0.5, -0.3, 0.0, 0.0, 0.0, 0.0]}"
+```
 
-## License
+**Monitor joint state:**
+```bash
+ros2 topic echo /joint_states
+```
 
-MIT
+## Architecture
+
+```
+ik_arm/
+├── src/
+│   ├── robot_model.hpp       # DHJoint struct, RobotModel class
+│   ├── robot_model.cpp     # FK, numerical Jacobian, SVD damped IK
+│   └── ik_arm_node.cpp     # ROS2 node — topics, IK trigger, control loop
+├── config/
+│   └── arm_config.yaml     # DH parameters, IK tuning, control rate
+├── CMakeLists.txt
+└── package.xml
+```
+
+## Kinematics
+
+- **DH convention**: Craig (standard), `Rot_z(θ)·Trans_z(d)·Trans_x(a)·Rot_x(α)`
+- **Jacobian**: 6×n numerical (finite difference, ε = 1e⁻⁸)
+- **IK solver**: SVD damped pseudo-inverse with Levenberg-Marquardt damping and 5 random retries
+- **6-DOF PUMA-like arm**: d₁ = 0.30 m, a₂ = 0.30 m, a₃ = 0.10 m, d₄ = 0.30 m, d₆ = 0.15 m
+
+## Build
+
+```bash
+cd ~/ros2_ws
+colcon build --packages-select ik_arm
+source install/setup.bash
+```
