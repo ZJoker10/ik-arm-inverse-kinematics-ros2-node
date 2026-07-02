@@ -1,0 +1,15 @@
+# ComputeIK action
+# Goal: target end-effector pose
+# Result: joint angles + convergence status + final error
+# Feedback: progress during IK computation
+
+geometry_msgs/Pose target_pose
+---
+float64[] joint_positions
+bool success
+float64 position_error
+float64 orientation_error
+---
+float64 current_position_error
+float64 current_orientation_error
+int32 iteration
